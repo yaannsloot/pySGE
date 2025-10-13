@@ -9,3 +9,5 @@
 
 ### Run example
 ```python example.py```
+
+![example](./assets/example.gif)
