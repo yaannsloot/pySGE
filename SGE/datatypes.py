@@ -8,6 +8,7 @@ from .utils import index
 Number: TypeAlias = Union[int,float]
 RGB: TypeAlias = Union["Color", tuple[float, float, float]]
 Vec3: TypeAlias = Union["Vector3", tuple[float, float, float]]
+Vec2: TypeAlias = Union["Vector2", tuple[float, float]]
 
 class Color:
     def __init__(self, r:float=1.0, g:float=1.0, b:float=1.0, buffer=None):
@@ -202,10 +203,147 @@ class Vector3:
             self.y / m,
             self.z / m
         )    
+    
+    @property
+    def xyz(self):
+        return tuple(self)
+    
+    @xyz.setter
+    def xyz(self, value: tuple[float, float, float]):
+        self.x = value[0]
+        self.y = value[1]
+        self.z = value[2]
 
     @classmethod
     def ones(cls) -> "Vector3":
         return cls(1, 1, 1)
+
+class Vector2:
+    def __init__(self, 
+                 x:float=0.0, 
+                 y:float=0.0, 
+                 buffer=None):
+        self._v = np.array([x, y], dtype=np.float32) if buffer is None else buffer
+
+    @property
+    def x(self):
+        return self._v[0]
+
+    @property
+    def y(self):
+        return self._v[1]
+
+    @x.setter
+    def x(self, val:Number):
+        self._v[0] = val
+
+    @y.setter
+    def y(self, val:Number):
+        self._v[1] = val
+
+    def update(self, x:float, y:float) -> None:
+        self.x = x
+        self.y = y
+
+    def __mul__(self, other:Union["Vector2",Number]) -> "Vector2":
+        if isinstance(other, Vector2):
+            return Vector2(
+                self.x * other.x,
+                self.y * other.y
+            )
+        return Vector2(
+            self.x * other,
+            self.y * other
+        )
+    
+    def __truediv__(self, other:Union["Vector2",Number]) -> "Vector2":
+        if isinstance(other, Vector2):
+            return Vector2(
+                self.x / other.x,
+                self.y / other.y
+            )
+        return Vector2(
+            self.x / other,
+            self.y / other
+        )
+
+    def __add__(self, other:Union["Vector2",Number]) -> "Vector2":
+        if isinstance(other, Vector2):
+            return Vector2(
+                self.x + other.x,
+                self.y + other.y
+            )
+        return Vector2(
+            self.x + other,
+            self.y + other
+        )
+
+    def __sub__(self, other:Union["Vector2",Number]) -> "Vector2":
+        if isinstance(other, Vector2):
+            return Vector2(
+                self.x - other.x,
+                self.y - other.y
+            )
+        return Vector2(
+            self.x - other,
+            self.y - other
+        )
+
+    def __neg__(self) -> "Vector2":
+        return Vector2(-self.x, -self.y)
+
+    def __iter__(self):
+        yield self.x
+        yield self.y
+
+    def __eq__(self, value:"Vector2"):
+        return all(a == b for a, b in zip(self, value))
+
+    def __str__(self):
+        return f"Vector2(x={self.x:f.4}, y={self.y:f.4})"
+    
+    def __repr__(self):
+        return str(self)
+
+    def __getitem__(self, idx:int):
+        return self._v[idx]
+    
+    def __setitem__(self, idx:int, value:Number):
+        self._v[idx] = value
+
+    @property
+    def inv(self) -> "Vector2":
+        return Vector2(
+            1 / self.x if self.x != 0 else 0,
+            1 / self.y if self.y != 0 else 0
+        )
+
+    @property
+    def magnitude(self) -> float:
+        return math.sqrt(self.x**2 + self.y**2)
+
+    @property
+    def normalized(self) -> "Vector2":
+        m = self.magnitude
+        if m == 0:
+            return Vector2()
+        return Vector2(
+            self.x / m,
+            self.y / m
+        )    
+    
+    @property
+    def xy(self):
+        return tuple(self)
+    
+    @xy.setter
+    def xy(self, value: tuple[float, float]):
+        self.x = value[0]
+        self.y = value[1]
+
+    @classmethod
+    def ones(cls) -> "Vector2":
+        return cls(1, 1)
 
 @dataclass
 class Quaternion:

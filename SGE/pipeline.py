@@ -2,9 +2,10 @@ from abc import ABC, abstractmethod
 import numpy as np
 import pywavefront
 from typing import Callable, TypeAlias
-from .datatypes import Vector3, Color, Transform
+from .datatypes import Vector3, Vector2, Color, Transform
 
 RenderFunction: TypeAlias = Callable[[Transform],None] # Must be a world transform
+CPUPointBuffer: TypeAlias = np.ndarray[tuple[float, float], np.float32]
 CPUVertexBuffer: TypeAlias = np.ndarray[tuple[float, float, float], np.float32]
 CPUIFaceBuffer: TypeAlias = np.ndarray[tuple[int, int, int], np.uint32]
 
@@ -14,11 +15,13 @@ class Mesh(ABC):
                  vertices:CPUVertexBuffer,
                  normals:CPUVertexBuffer,
                  vertex_colors:CPUVertexBuffer,
-                 faces:CPUIFaceBuffer):
+                 faces:CPUIFaceBuffer,
+                 uv: CPUPointBuffer):
         self._v_buf = vertices
         self._n_buf = normals
         self._c_buf = vertex_colors
         self._f_buf = faces # Should not be edited
+        self._uv_buf = uv
         
     @property
     @abstractmethod
@@ -41,6 +44,13 @@ class Mesh(ABC):
         # A syncronization mechanism should also ideally be implemented to push partial updates to the GPU.
         pass
 
+    @property
+    @abstractmethod
+    def uv(self) -> tuple[Vector2]:
+        # Should return a pre-initialized tuple of Vector2s WITH views to internal CPU buffers.
+        # A syncronization mechanism should also ideally be implemented to push partial updates to the GPU.
+        pass
+
     @abstractmethod
     def draw_wire(self):
         pass
@@ -53,6 +63,10 @@ class Mesh(ABC):
     def from_obj_file(cls, path:str) -> "Mesh":
         scene = pywavefront.Wavefront(path, collect_faces=True)
         vertices = np.array(scene.vertices, dtype=np.float32)
+        if scene.parser.tex_coords:
+            uvs = np.array(scene.parser.tex_coords, dtype=np.float32)
+        else:
+            uvs = np.zeros((len(vertices), 2), dtype=np.float32)
         faces = []
         for mesh in scene.mesh_list:
             faces.append(np.array(mesh.faces, np.uint32))
@@ -70,7 +84,7 @@ class Mesh(ABC):
         for i in range(3):
             np.add.at(normals, faces[:, i], face_normals)
         normals /= np.linalg.norm(normals, axis=1, keepdims=True) + 1e-8
-        return cls(vertices, normals, colors, faces)
+        return cls(vertices, normals, colors, faces, uvs)
 
 class RenderingPipeline(ABC):
     """Actual implementation should include type aliases and render function factories"""
