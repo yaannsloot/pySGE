@@ -1,11 +1,11 @@
 import math
-from typing import Optional, TypeAlias
+from typing import Optional, TypeAlias, Union, Optional
 from OpenGL.GL import *
 from OpenGL.GLU import *
 from .core import Light, Camera
-from .datatypes import Vec3, RGB, Vector3, Color, Quaternion, Transform
-from .pipeline import RenderingPipeline, RenderFunction
-from .gl_common_types import glMesh
+from .datatypes import Vec3, RGBA, RGB, Vector3, Color, Quaternion, Transform
+from .pipeline import RenderingPipeline, RenderFunction, Material
+from .gl_common_types import glMesh, glTexture
 
 class glFFPMesh(glMesh):
     def draw_wire(self):
@@ -127,14 +127,72 @@ class glFFPCamera(Camera):
         glLoadIdentity()
         glMultMatrixf(list(wt.inv.mat.T.m))
 
+class glFFPMaterial(Material):
+    def __init__(self, 
+                 base_color: Union[glTexture, RGBA] = (1, 1, 1, 1), 
+                 specular: Union[glTexture, float] = (1, 1, 1), 
+                 emission: Union[glTexture, RGB] = (0, 0, 0),
+                 shininess: float = 32.0):
+        super().__init__(base_color=base_color,
+                         specular=specular,
+                         emission=emission)
+        self.shininess = shininess
+
+    def bind(self):
+        lit = glIsEnabled(GL_LIGHTING)
+        glActiveTexture(GL_TEXTURE0)
+        if isinstance(self.base_color, glTexture):
+            glEnable(GL_TEXTURE_2D)
+            self.base_color.bind()
+            glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE)
+        else:
+            glDisable(GL_TEXTURE_2D)
+            glMaterialfv(GL_FRONT_AND_BACK, GL_AMBIENT_AND_DIFFUSE, self.base_color.rgba)
+        glActiveTexture(GL_TEXTURE1)
+        if isinstance(self.specular, glTexture):
+            glEnable(GL_TEXTURE_2D)
+            self.specular.bind()
+            glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_COMBINE)
+            glTexEnvi(GL_TEXTURE_ENV, GL_COMBINE_RGB, GL_ADD)
+            glTexEnvi(GL_TEXTURE_ENV, GL_SOURCE0_RGB, GL_PREVIOUS)
+            glTexEnvi(GL_TEXTURE_ENV, GL_SOURCE1_RGB, GL_TEXTURE)
+        else:
+            glDisable(GL_TEXTURE_2D)
+            glMaterialfv(GL_FRONT_AND_BACK, GL_SPECULAR, (*self.specular.rgb, 1.0))
+        if isinstance(self.emission, glTexture):
+            glActiveTexture(GL_TEXTURE0)
+            glDisable(GL_LIGHTING)
+            glEnable(GL_BLEND)
+            glBlendFunc(GL_ONE, GL_ONE)
+            glEnable(GL_TEXTURE_2D)
+            self.emission.bind()
+            glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_REPLACE)
+        else:
+            glMaterialfv(GL_FRONT_AND_BACK, GL_EMISSION, (*self.emission, 1.0))
+        glMaterialf(GL_FRONT_AND_BACK, GL_SHININESS, self.shininess)
+        glActiveTexture(GL_TEXTURE0)
+        if lit:
+            glEnable(GL_LIGHTING)
+
+    def unbind(self):
+        for unit in (GL_TEXTURE2, GL_TEXTURE1, GL_TEXTURE0):
+            glActiveTexture(unit)
+            glDisable(GL_TEXTURE_2D)
+        glDisable(GL_BLEND)
+        glActiveTexture(GL_TEXTURE0)
+        glTexture.unbind()
+
 class glFFPRenderingPipeline(RenderingPipeline):
     Mesh: TypeAlias = glFFPMesh
+    Texture: TypeAlias = glTexture
+    Material: TypeAlias = glFFPMaterial
     Light: TypeAlias = glFFPLight
     Camera: TypeAlias = glFFPCamera
 
     def __init__(self):
         super().__init__()
         self._g_ambient = Color(0.05, 0.05, 0.05)
+        self.lighting = True
 
     @property
     def global_ambient_light(self) -> Color:
@@ -142,13 +200,12 @@ class glFFPRenderingPipeline(RenderingPipeline):
     
     @global_ambient_light.setter
     def global_ambient_light(self, value:RGB):
-        self._g_ambient.rgb = value
+        self._g_ambient.rgb = tuple(value)
 
     def pre(self):
         glEnable(GL_DEPTH_TEST) 
-        glEnable(GL_LIGHTING)
-        glEnable(GL_COLOR_MATERIAL)
-        glColorMaterial(GL_FRONT_AND_BACK, GL_AMBIENT_AND_DIFFUSE)
+        if self.lighting:
+            glEnable(GL_LIGHTING)
         glLightModelfv(GL_LIGHT_MODEL_AMBIENT, (*self._g_ambient, 1.0))
         glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT)
 
@@ -206,20 +263,25 @@ class glFFPRenderingPipeline(RenderingPipeline):
         return wrapper
     
     @staticmethod
-    def MeshRenderer(mesh: Mesh, solid=True, flat_shading=False, wire=False, wire_color:tuple[float,float,float]=(1.0, 1.0, 1.0)) -> RenderFunction:
+    def MeshRenderer(mesh: Mesh, 
+                     material: Optional[glFFPMaterial] = None, 
+                     solid=True, 
+                     flat_shading=False, 
+                     wire=False, 
+                     wire_color:tuple[float,float,float]=(1.0, 1.0, 1.0)) -> RenderFunction:
         def r_mesh(wt: Transform):
-            lit = glIsEnabled(GL_LIGHTING)
             glPushMatrix()
             glMultMatrixf(list(wt.mat.T.m))
             if solid:
-                glEnable(GL_LIGHTING)
                 glShadeModel(GL_FLAT if flat_shading else GL_SMOOTH)
+                if material:
+                    material.bind()
                 mesh.draw_solid()
+                if material:
+                    material.unbind()
             if wire:
                 glDisable(GL_LIGHTING)
                 glColor3f(*wire_color)
                 mesh.draw_wire()
-            if lit:
-                glEnable(GL_LIGHTING)
             glPopMatrix()
         return r_mesh

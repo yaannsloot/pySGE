@@ -30,7 +30,9 @@ def main():
     light2.color.rgb = (1, 0, 0)
     print("LOAD teapot.obj")
     mesh = pipeline.Mesh.from_obj_file("teapot.obj")
-    mesh_obj = Object(render_func=pipeline.MeshRenderer(mesh, flat_shading=False))
+    material = pipeline.Material()
+    material.specular = (0,0,0)
+    mesh_obj = Object(render_func=pipeline.MeshRenderer(mesh, material=material, flat_shading=False))
     mesh_obj.set_parent(scene)
     mesh_obj.local_transform.scale *= 0.18
     previous_time = time.perf_counter()

@@ -1,8 +1,8 @@
 from OpenGL.GL import *
 from OpenGL.GLU import *
 from OpenGL.arrays import vbo
-from .pipeline import Mesh
-from .datatypes import Vector3, Vector2, Color
+from .pipeline import Mesh, Texture, WrapMethod, FilterMethod
+from .datatypes import Vector3, Vector2, Color4, Color
 from .utils import SignalingProxyBuffer, group
 
 class glMesh(Mesh):
@@ -74,3 +74,47 @@ class glMesh(Mesh):
     def _bind_and_update_uv(self):
         self._uv_vbo.bind()
         self._push_writes(self._uv_writes, self._uv_buf, vec_n=2)
+
+class glTexture(Texture):
+    def __init__(self, data):
+        super().__init__(data)
+        self._data_writes = set()
+        w = self.width
+        h = self.height
+        self._data_refs = tuple([tuple([
+                Color4(buffer=SignalingProxyBuffer(self._data[j][i], buffer_index=j * w + i, modified_list=self._data_writes))
+                for i in range(w)]) for j in range(h)])
+        self._data_gl_texid = glGenTextures(1)
+        self.bind()
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, self.width, self.height, 
+                     0, GL_RGBA, GL_FLOAT, self._data)
+        self.unbind()
+        
+    @property
+    def data(self):
+        return self._data_refs
+    
+    def bind(self):
+        glBindTexture(GL_TEXTURE_2D, self._data_gl_texid)
+        if self.wrap_method == WrapMethod.REPEAT:
+            mode = GL_REPEAT
+        elif self.wrap_method == WrapMethod.MIRRORED:
+            mode = GL_MIRRORED_REPEAT
+        elif self.wrap_method == WrapMethod.CLAMP_TO_EDGE:
+            mode = GL_CLAMP_TO_EDGE
+        else:
+            mode = GL_CLAMP_TO_BORDER
+            glTexParameterfv(GL_TEXTURE_2D, GL_TEXTURE_BORDER_COLOR, self.border_color.rgba)
+        if self.filter_method == FilterMethod.NEAREST:
+            filter_mode = GL_NEAREST
+        else:
+            filter_mode = GL_LINEAR
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, mode)
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, mode)
+        glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter_mode)
+        glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST)
+
+    @staticmethod
+    def unbind():
+        glBindTexture(GL_TEXTURE_2D, 0)
+    

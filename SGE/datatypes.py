@@ -7,8 +7,90 @@ from .utils import index
 
 Number: TypeAlias = Union[int,float]
 RGB: TypeAlias = Union["Color", tuple[float, float, float]]
+RGBA: TypeAlias = Union["Color4", tuple[float, float, float, float]]
 Vec3: TypeAlias = Union["Vector3", tuple[float, float, float]]
 Vec2: TypeAlias = Union["Vector2", tuple[float, float]]
+
+class Color4:
+    def __init__(self, r:float=1.0, g:float=1.0, b:float=1.0, a=1.0, buffer=None):
+        self._c = np.zeros(4, dtype=np.float32) if buffer is None else buffer
+        if buffer is None:
+            self.r = r
+            self.g = g
+            self.b = b
+            self.a = a
+
+    @property
+    def r(self):
+        return self._c[0]
+
+    @property
+    def g(self):
+        return self._c[1]
+
+    @property
+    def b(self):
+        return self._c[2]
+    
+    @property
+    def a(self):
+        return self._c[3]
+
+    @r.setter
+    def r(self, val:float):
+        val = max(0, min(val, 1))
+        self._c[0] = val
+
+    @g.setter
+    def g(self, val:float):
+        val = max(0, min(val, 1))
+        self._c[1] = val
+
+    @b.setter
+    def b(self, val:float):
+        val = max(0, min(val, 1))
+        self._c[2] = val
+
+    @a.setter
+    def a(self, val:float):
+        val = max(0, min(val, 1))
+        self._c[3] = val
+
+    @property
+    def rgb(self)-> tuple[float, float, float]:
+        return (self.r, self.g, self.b)
+    
+    @rgb.setter
+    def rgb(self, value: tuple[float, float, float]):
+        self.r = value[0]
+        self.g = value[1]
+        self.b = value[2]
+
+    @property
+    def rgba(self)-> tuple[float, float, float, float]:
+        return tuple(self)
+    
+    @rgba.setter
+    def rgba(self, value: tuple[float, float, float, float]):
+        self.r = value[0]
+        self.g = value[1]
+        self.b = value[2]
+        self.a = value[3]
+
+    def __iter__(self):
+        yield self.r
+        yield self.g
+        yield self.b
+        yield self.a
+
+    def __eq__(self, value:"Color4"):
+        return all(a == b for a, b in zip(self, value))
+    
+    def __str__(self):
+        return f"Color4(r={self.r:.2f}, g={self.g:.2f}, b={self.b:.2f}, a={self.a:.2f})"
+    
+    def __repr__(self):
+        return str(self)
 
 class Color:
     def __init__(self, r:float=1.0, g:float=1.0, b:float=1.0, buffer=None):
@@ -100,11 +182,6 @@ class Vector3:
     @z.setter
     def z(self, val:Number):
         self._v[2] = val
-
-    def update(self, x:float, y:float, z:float) -> None:
-        self.x = x
-        self.y = y
-        self.z = z
 
     def __mul__(self, other:Union["Vector3",Number]) -> "Vector3":
         if isinstance(other, Vector3):
@@ -240,10 +317,6 @@ class Vector2:
     @y.setter
     def y(self, val:Number):
         self._v[1] = val
-
-    def update(self, x:float, y:float) -> None:
-        self.x = x
-        self.y = y
 
     def __mul__(self, other:Union["Vector2",Number]) -> "Vector2":
         if isinstance(other, Vector2):
