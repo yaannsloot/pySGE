@@ -37,7 +37,7 @@ def main():
     smoothed_dt = 1/30
     s_alpha = 0.05
 
-    camera = pipeline.Camera(view_width=display[0], view_height=display[1])
+    camera = pipeline.Camera(viewport_dims=display)
     camera.set_parent(scene)
     scene.active_camera = camera
     camera.fov = 20

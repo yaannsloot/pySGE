@@ -3,7 +3,7 @@ import uuid
 from typing import Union, Optional, TypeAlias
 from dataclasses import dataclass, field
 from abc import ABC, abstractmethod
-from .datatypes import Vector3, Quaternion, Transform, Vec3
+from .datatypes import Vector3, Vector2, Quaternion, Transform, Vec3, Vec2
 from .pipeline import RenderFunction
 
 ParentObj: TypeAlias = Union["Object", "Scene"]
@@ -90,15 +90,19 @@ class Light(Object, ABC):
 class Camera(Object, ABC):
     def __init__(self,
                  local_transform: Optional[Transform] = None,
-                 view_width = 640,
-                 view_height = 640,
+                 viewport_dims: Vec2 = (1, 1),
                  fov: float = 60.0,
-                 orthographic: bool = False):
+                 near: float = 1.0,
+                 far: float = 100.0,
+                 orthographic: bool = False,
+                 ortho_size = 10.0):
         local_transform = Transform() if local_transform is None else local_transform
+        self._v_dims = viewport_dims if isinstance(viewport_dims, Vector2) else Vector2(*viewport_dims)
         self.fov = fov
-        self.w = view_width
-        self.h = view_height
+        self.near = near
+        self.far = far
         self.orthographic = orthographic
+        self.ortho_size = ortho_size
         super().__init__(local_transform, self._render)
         self.priority = -100000 # first
 
@@ -112,19 +116,23 @@ class Camera(Object, ABC):
 
     @property
     def w(self) -> int:
-        return self._view_width
+        return self._v_dims.x
     
     @w.setter
     def w(self, value:int):
-        self._view_width = max(1, value)
+        self._v_dims.x = max(1, value)
 
     @property
     def h(self) -> int:
-        return self._view_height
+        return self._v_dims.y
     
     @h.setter
     def h(self, value:int):
-        self._view_height = max(1, value)
+        self._v_dims.y = max(1, value)
+
+    @property
+    def aspect(self):
+        return self._v_dims.x / self._v_dims.y
 
     @abstractmethod
     def _render(self, wt: Transform) -> None:

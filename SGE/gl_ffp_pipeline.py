@@ -110,23 +110,10 @@ class glFFPLight(Light):
         glPopMatrix()
 
 class glFFPCamera(Camera):
-    def __init__(self, local_transform = None, 
-                 view_width=640, 
-                 view_height=640, 
-                 fov = 60, 
-                 near = 1.0,
-                 far = 100.0,
-                 orthographic = False,
-                 ortho_size = 10.0):
-        self.near = near
-        self.far = far
-        self.ortho_size = ortho_size
-        super().__init__(local_transform, view_width, view_height, fov, orthographic)
-
     def _render(self, wt):
         glMatrixMode(GL_PROJECTION)
         glLoadIdentity()
-        aspect = self._view_width / self._view_height
+        aspect = self.aspect
         if self.orthographic:
             glOrtho(-self.ortho_size*aspect, 
                     self.ortho_size*aspect, 
