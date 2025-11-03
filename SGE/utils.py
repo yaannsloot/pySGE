@@ -1,4 +1,5 @@
 from typing import TypeVar, Generic, Union, Optional
+from collections.abc import Iterable
 
 def index(i: int, n: int) -> int:
     n = abs(n)
@@ -32,11 +33,11 @@ class SignalingProxyBuffer:
     def __init__(self, 
                  buffer,
                  flag:Union[Mutable[bool],None]=None, 
-                 buffer_index:Optional[int]=None,
+                 buffer_index:Optional[Union[set[int],list[int], int]]=None,
                  modified_list:Optional[Union[set[int],list[int]]]=None):
         self.buffer = buffer
         self.flag = flag
-        self.buffer_index = buffer_index
+        self.buffer_index = buffer_index if isinstance(buffer_index, (list, set)) else [buffer_index]
         self.modified_list = modified_list
 
     def _notify_write(self):
@@ -44,13 +45,19 @@ class SignalingProxyBuffer:
             self.flag.value = True
         if all(i is not None for i in (self.buffer_index, self.modified_list)):
             if isinstance(self.modified_list, list):
-                self.modified_list.append(self.buffer_index)
+                self.modified_list.extend(self.buffer_index)
             else:
-                self.modified_list.add(self.buffer_index)
+                self.modified_list.update(self.buffer_index)
 
     def __getitem__(self, idx:int):
+        if self.buffer and isinstance(self.buffer, list) and isinstance(self.buffer[0], Iterable):
+            return self.buffer[0][idx]
         return self.buffer[idx]
     
     def __setitem__(self, idx:int, value):
         self._notify_write()
-        self.buffer[idx] = value
+        if self.buffer and isinstance(self.buffer, list) and isinstance(self.buffer[0], Iterable):
+            for buf in self.buffer:
+                buf[idx] = value
+        else:
+            self.buffer[idx] = value
