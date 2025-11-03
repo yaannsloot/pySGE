@@ -2,20 +2,129 @@ import math
 from typing import Optional, TypeAlias, Union, Optional
 from OpenGL.GL import *
 from OpenGL.GLU import *
+from OpenGL.arrays import vbo
 from .core import Light, Camera
-from .datatypes import Vec3, RGBA, RGB, Vector3, Color, Quaternion, Transform
-from .pipeline import RenderingPipeline, RenderFunction, Material
-from .gl_common_types import glMesh, glTexture
+from .utils import SignalingProxyBuffer, group
+from .datatypes import Vec3, RGBA, RGB, Vector3, Vector2, Color, Quaternion, Transform
+from .pipeline import RenderingPipeline, RenderFunction, Mesh, Material
+from .gl_common_types import glTexture
 
-class glFFPMesh(glMesh):
+class glFFPMesh(Mesh):
+    def __init__(self, vertices, normals, vertex_colors, faces, uv, dynamic=True):
+        super().__init__(vertices, normals, vertex_colors, faces, uv)
+        f_indices = self._f_buf.flatten()
+        v_bins = [[] for _ in range(self._v_buf.shape[0])]
+        v_n = self._v_buf.shape[0]
+        for i, v in enumerate(f_indices):
+            v_bins[v].append(i)
+        self._v_buf = self._v_buf[self._f_buf].reshape(-1, 3)
+        if self._n_buf.shape != self._v_buf.shape:
+            self._n_buf = self._n_buf[self._f_buf].reshape(-1, 3)
+        self._c_buf = self._c_buf[self._f_buf].reshape(-1, 3)
+        self._uv_buf = self._uv_buf.reshape(-1, 2)
+        self._v_writes = set()
+        self._n_writes = set()
+        self._c_writes = set()
+        self._uv_writes = set()
+        self._v_refs = tuple([
+            Vector3(buffer=SignalingProxyBuffer(
+                buffer = [self._v_buf[j] for j in v_bins[i]],
+                buffer_index = v_bins[i],
+                modified_list = self._v_writes)) for i in range(v_n)]) if dynamic else ()
+        self._n_refs = tuple([
+            Vector3(buffer=SignalingProxyBuffer(
+                buffer = self._n_buf[i],
+                buffer_index = i,
+                modified_list = self._n_writes)) for i in range(self._n_buf.shape[0])]) if dynamic else ()
+        self._c_refs = tuple([
+            Vector3(buffer=SignalingProxyBuffer(
+                buffer = [self._c_buf[j] for j in v_bins[i]],
+                buffer_index = v_bins[i],
+                modified_list = self._c_writes)) for i in range(v_n)]) if dynamic else ()
+        self._uv_refs = tuple([
+            Vector2(buffer=SignalingProxyBuffer(self._uv_buf[i], buffer_index=i, modified_list=self._uv_writes))
+            for i in range(self._uv_buf.shape[0])]) if dynamic else ()
+        self._vert_vbo = vbo.VBO(self._v_buf)
+        self._normal_vbo = vbo.VBO(self._n_buf)
+        self._color_vbo = vbo.VBO(self._c_buf)
+        self._uv_vbo = vbo.VBO(self._uv_buf)
+
+    @property
+    def vertices(self) -> tuple[Vector3]:
+        return self._v_refs
+    
+    @property
+    def normals(self) -> tuple[Vector3]:
+        return self._n_refs
+    
+    @property
+    def colors(self) -> tuple[Vector3]:
+        return self._c_refs
+    
+    @property
+    def uv(self) -> tuple[Vector2]:
+        return self._uv_refs
+
+    def recalculate_normals(self):
+        super().recalculate_normals()
+        self._n_writes.add(0) # mark buffer as dirty
+
+    def _push_writes(self, write_list, buffer, vec_n=3):
+        # For float32 buffers only
+        # MUST BIND BEFORE CALLING
+        if not write_list:
+            return
+        write_groups = group(write_list)
+        for g in write_groups:
+            first = g[0]
+            last = g[-1]
+            g_data = buffer[first:last+1]
+            glBufferSubData(GL_ARRAY_BUFFER, first * vec_n * 4, g_data.nbytes, g_data)
+
+    def _gpu_sync(self):
+        if self._v_writes:
+            self._vert_vbo.bind()
+            glBufferSubData(GL_ARRAY_BUFFER, 0, self._v_buf.nbytes, self._v_buf)
+            self._vert_vbo.unbind()
+            self._v_writes.clear()
+        if self._n_writes:
+            self._normal_vbo.bind()
+            glBufferSubData(GL_ARRAY_BUFFER, 0, self._n_buf.nbytes, self._n_buf)
+            self._normal_vbo.unbind()
+            self._n_writes.clear()
+        if self._c_writes:
+            self._color_vbo.bind()
+            glBufferSubData(GL_ARRAY_BUFFER, 0, self._c_buf.nbytes, self._c_buf)
+            self._color_vbo.unbind()
+            self._c_writes.clear()
+        if self._uv_writes:
+            self._uv_vbo.bind()
+            glBufferSubData(GL_ARRAY_BUFFER, 0, self._uv_buf.nbytes, self._uv_buf)
+            self._uv_vbo.unbind()
+            self._uv_writes.clear()
+
+    def _bind_and_update_v(self):
+        self._vert_vbo.bind()
+        self._push_writes(self._v_writes, self._v_buf)
+
+    def _bind_and_update_n(self):
+        self._normal_vbo.bind()
+        self._push_writes(self._n_writes, self._n_buf)
+
+    def _bind_and_update_c(self):
+        self._color_vbo.bind()
+        self._push_writes(self._c_writes, self._c_buf)
+
+    def _bind_and_update_uv(self):
+        self._uv_vbo.bind()
+        self._push_writes(self._uv_writes, self._uv_buf, vec_n=2)
+
     def draw_wire(self):
         glPolygonMode(GL_FRONT_AND_BACK, GL_LINE)
         glEnableClientState(GL_VERTEX_ARRAY)
         self._bind_and_update_v()
         glVertexPointer(3, GL_FLOAT, 0, None)
-        self._face_vbo.bind()
         glDrawElements(GL_TRIANGLES, self._face_count, GL_UNSIGNED_INT, None)
-        self._face_vbo.unbind()
         self._vert_vbo.unbind()
         glDisableClientState(GL_VERTEX_ARRAY)
 
@@ -34,9 +143,7 @@ class glFFPMesh(glMesh):
         glColorPointer(3, GL_FLOAT, 0, None)
         self._bind_and_update_uv()
         glTexCoordPointer(2, GL_FLOAT, 0, None)
-        self._face_vbo.bind()
-        glDrawElements(GL_TRIANGLES, self._face_count, GL_UNSIGNED_INT, None)
-        self._face_vbo.unbind()
+        glDrawArrays(GL_TRIANGLES, 0, self._v_buf.shape[0])
         self._uv_vbo.unbind()
         self._color_vbo.unbind()
         self._normal_vbo.unbind()
@@ -45,6 +152,10 @@ class glFFPMesh(glMesh):
         glDisableClientState(GL_COLOR_ARRAY)
         glDisableClientState(GL_NORMAL_ARRAY)
         glDisableClientState(GL_VERTEX_ARRAY)
+
+    @classmethod
+    def from_obj_file(cls, path, dynamic=True):
+        return cls(*cls._load_mesh_from_obj(path), dynamic)
 
 class glFFPLight(Light):
     def __init__(self, 
@@ -130,7 +241,7 @@ class glFFPCamera(Camera):
 class glFFPMaterial(Material):
     def __init__(self, 
                  base_color: Union[glTexture, RGBA] = (1, 1, 1, 1), 
-                 specular: Union[glTexture, float] = (1, 1, 1), 
+                 specular: Union[glTexture, RGB] = (1, 1, 1), 
                  emission: Union[glTexture, RGB] = (0, 0, 0),
                  shininess: float = 32.0):
         super().__init__(base_color=base_color,
@@ -138,7 +249,7 @@ class glFFPMaterial(Material):
                          emission=emission)
         self.shininess = shininess
 
-    def bind(self):
+    def draw(self, mesh: glFFPMesh):
         lit = glIsEnabled(GL_LIGHTING)
         glActiveTexture(GL_TEXTURE0)
         if isinstance(self.base_color, glTexture):
@@ -148,39 +259,46 @@ class glFFPMaterial(Material):
         else:
             glDisable(GL_TEXTURE_2D)
             glMaterialfv(GL_FRONT_AND_BACK, GL_AMBIENT_AND_DIFFUSE, self.base_color.rgba)
-        glActiveTexture(GL_TEXTURE1)
+        if isinstance(self.specular, Color):
+            glMaterialfv(GL_FRONT_AND_BACK, GL_SPECULAR, (*self.specular.rgb, 1.0))
+        else:
+            glMaterialfv(GL_FRONT_AND_BACK, GL_SPECULAR, (1.0, 1.0, 1.0, 1.0))
+        if isinstance(self.emission, Color):
+            glMaterialfv(GL_FRONT_AND_BACK, GL_EMISSION, (*self.emission, 1.0))
+        mesh.draw_solid()
         if isinstance(self.specular, glTexture):
+            glDepthMask(GL_FALSE)
+            glDepthFunc(GL_EQUAL)
+            glEnable(GL_BLEND)
+            glBlendFunc(GL_DST_COLOR, GL_ONE)
+            glActiveTexture(GL_TEXTURE0)
             glEnable(GL_TEXTURE_2D)
             self.specular.bind()
-            glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_COMBINE)
-            glTexEnvi(GL_TEXTURE_ENV, GL_COMBINE_RGB, GL_ADD)
-            glTexEnvi(GL_TEXTURE_ENV, GL_SOURCE0_RGB, GL_PREVIOUS)
-            glTexEnvi(GL_TEXTURE_ENV, GL_SOURCE1_RGB, GL_TEXTURE)
-        else:
-            glDisable(GL_TEXTURE_2D)
-            glMaterialfv(GL_FRONT_AND_BACK, GL_SPECULAR, (*self.specular.rgb, 1.0))
+            glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_REPLACE)
+            mesh.draw_solid()
+            glDepthMask(GL_TRUE)
+            glDepthFunc(GL_LESS)
+            glDisable(GL_BLEND) 
         if isinstance(self.emission, glTexture):
-            glActiveTexture(GL_TEXTURE0)
+            glDepthMask(GL_FALSE)
+            glDepthFunc(GL_EQUAL)
             glDisable(GL_LIGHTING)
             glEnable(GL_BLEND)
             glBlendFunc(GL_ONE, GL_ONE)
+            glActiveTexture(GL_TEXTURE0)
             glEnable(GL_TEXTURE_2D)
             self.emission.bind()
             glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_REPLACE)
-        else:
-            glMaterialfv(GL_FRONT_AND_BACK, GL_EMISSION, (*self.emission, 1.0))
+            mesh.draw_solid()
+            glDepthMask(GL_TRUE)
+            glDepthFunc(GL_LESS)
+            glDisable(GL_BLEND)
         glMaterialf(GL_FRONT_AND_BACK, GL_SHININESS, self.shininess)
-        glActiveTexture(GL_TEXTURE0)
-        if lit:
-            glEnable(GL_LIGHTING)
-
-    def unbind(self):
-        for unit in (GL_TEXTURE2, GL_TEXTURE1, GL_TEXTURE0):
-            glActiveTexture(unit)
-            glDisable(GL_TEXTURE_2D)
-        glDisable(GL_BLEND)
+        glDisable(GL_TEXTURE_2D)
         glActiveTexture(GL_TEXTURE0)
         glTexture.unbind()
+        if lit:
+            glEnable(GL_LIGHTING)
 
 class glFFPRenderingPipeline(RenderingPipeline):
     Mesh: TypeAlias = glFFPMesh
@@ -275,10 +393,8 @@ class glFFPRenderingPipeline(RenderingPipeline):
             if solid:
                 glShadeModel(GL_FLAT if flat_shading else GL_SMOOTH)
                 if material:
-                    material.bind()
+                    material.draw(mesh)
                 mesh.draw_solid()
-                if material:
-                    material.unbind()
             if wire:
                 glDisable(GL_LIGHTING)
                 glColor3f(*wire_color)

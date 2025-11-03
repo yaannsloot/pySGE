@@ -22,7 +22,6 @@ class FilterMethod(Enum):
     NEAREST = 1
     LINEAR = 2
 
-# Update this to include 
 class Mesh(ABC):
     def __init__(self, 
                  vertices:CPUVertexBuffer,
@@ -30,6 +29,17 @@ class Mesh(ABC):
                  vertex_colors:CPUVertexBuffer,
                  faces:CPUIFaceBuffer,
                  uv: CPUPointBuffer):
+        """
+        v = number of vertices
+
+        s = number of surfaces/faces
+        Args:
+            vertices: v, 3 array of vertices
+            normals: v, 3 array of vertex normals or s*3, 3 array of vertex normals per face
+            vertex_colors: v, 3 array of vertex colors
+            faces: s, 3 array of vertex indexed triangular faces
+            uv: s, 3, 2 array of vertex UVs per face
+        """
         self._v_buf = vertices
         self._n_buf = normals
         self._c_buf = vertex_colors
@@ -48,6 +58,8 @@ class Mesh(ABC):
     def normals(self) -> tuple[Vector3]:
         # Should return a pre-initialized tuple of Vector3s WITH views to internal CPU buffers.
         # A syncronization mechanism should also ideally be implemented to push partial updates to the GPU.
+        # Unlike the layout of vertices and vertex colors, this will return an array with the same
+        # flattened shape as UVs, as normals are per vertex, per face.
         pass
 
     @property
@@ -62,6 +74,8 @@ class Mesh(ABC):
     def uv(self) -> tuple[Vector2]:
         # Should return a pre-initialized tuple of Vector2s WITH views to internal CPU buffers.
         # A syncronization mechanism should also ideally be implemented to push partial updates to the GPU.
+        # Unlike the formatting expected by the initializer, this function should return 
+        # a flattened tuple in the shape of 3*s, 2, 2 being the Vector2 reference.
         pass
 
     @abstractmethod
@@ -72,32 +86,95 @@ class Mesh(ABC):
     def draw_solid(self):
         pass
 
-    @classmethod
-    def from_obj_file(cls, path:str) -> "Mesh":
-        scene = pywavefront.Wavefront(path, collect_faces=True)
-        vertices = np.array(scene.vertices, dtype=np.float32)
-        if scene.parser.tex_coords:
-            uvs = np.array(scene.parser.tex_coords, dtype=np.float32)
-        else:
-            uvs = np.zeros((len(vertices), 2), dtype=np.float32)
-        faces = []
-        for mesh in scene.mesh_list:
-            faces.append(np.array(mesh.faces, np.uint32))
-        faces = np.vstack(faces)
-        colors = np.ones_like(vertices)
-        fv = vertices[faces]
+    @abstractmethod
+    def _gpu_sync(self):
+        # If any CPU buffers are dirty, this will reupload the buffer in bulk to the GPU.
+        # Meant for cases where there is a significant amount of edits between frames.
+        pass
+
+    def recalculate_normals(self):
+        fv = self._v_buf[self._f_buf]
         p1 = fv[:,0]
         p2 = fv[:,1]
         p3 = fv[:,2]
         u = p2 - p1
         v = p3 - p1
-        normals = np.zeros_like(vertices, dtype=np.float32)
+        normals = np.zeros_like(self._v_buf, dtype=np.float32)
         face_normals = np.cross(u, v)
         face_normals /= np.linalg.norm(face_normals, axis=1, keepdims=True) + 1e-8
         for i in range(3):
-            np.add.at(normals, faces[:, i], face_normals)
+            np.add.at(normals, self._f_buf[:, i], face_normals)
         normals /= np.linalg.norm(normals, axis=1, keepdims=True) + 1e-8
-        return cls(vertices, normals, colors, faces, uvs)
+        self._n_buf = normals
+        self._gpu_sync()
+
+    @staticmethod
+    def _load_mesh_from_obj(path):
+        scene = pywavefront.Wavefront(path, collect_faces=True)
+        faces = []
+        data = { # keeping here in case other interleaved data becomes useful later
+            "V3F": {
+                "len": 3,
+                "d": []
+            },
+            "N3F": {
+                "len": 3,
+                "d": []
+            },
+            "T2F": {
+                "len": 2,
+                "d": []
+            },
+            "C3F": {
+                "len": 3,
+                "d": []
+            },
+        }
+        for mesh in scene.mesh_list:
+            faces.append(np.array(mesh.faces, np.uint32))
+            mat = mesh.materials[0] if mesh.materials else []
+            layout = mat.vertex_format.split('_')
+            seg_n = sum(data[l]["len"] for l in layout)
+            vertices = np.array(mat.vertices, np.float32)
+            vertices = vertices.reshape((vertices.size // seg_n, seg_n))
+            offset = 0
+            for i, l in enumerate(layout):
+                len = data[l]["len"]
+                s = vertices[:,offset:offset + len]
+                data[l]["d"].append(s)
+                offset += len
+        faces = np.vstack(faces)
+        for l in data:
+            d = data[l]["d"]
+            if not d:
+                continue
+            data[l]["d"] = np.vstack(d)
+        uvs = data["T2F"]["d"]
+        uvs[:, 1] = 1 - uvs[:, 1]
+        uvs = uvs.reshape(faces.shape[0], 3, 2)
+        vertices = np.array(scene.vertices, np.float32)
+        colors = np.ones_like(vertices)
+        v_norm = data["N3F"]["d"]
+        if not isinstance(v_norm, list):
+            normals = v_norm
+        else:
+            fv = vertices[faces]
+            p1 = fv[:,0]
+            p2 = fv[:,1]
+            p3 = fv[:,2]
+            u = p2 - p1
+            v = p3 - p1
+            normals = np.zeros_like(vertices, dtype=np.float32)
+            face_normals = np.cross(u, v)
+            face_normals /= np.linalg.norm(face_normals, axis=1, keepdims=True) + 1e-8
+            for i in range(3):
+                np.add.at(normals, faces[:, i], face_normals)
+            normals /= np.linalg.norm(normals, axis=1, keepdims=True) + 1e-8
+        return vertices, normals, colors, faces, uvs
+
+    @classmethod
+    def from_obj_file(cls, path:str) -> "Mesh":
+        return cls(*cls._load_mesh_from_obj(path))
 
 class Texture(ABC):
     def __init__(self, 
@@ -149,13 +226,19 @@ class Texture(ABC):
         # A syncronization mechanism should also ideally be implemented to push partial updates to the GPU.
         pass
 
-    @classmethod
-    def from_file(cls, path):
+    @staticmethod
+    def _load_img_file(path):
         img = oiio.ImageInput.open(path)
         if img:
             data = img.read_image()
             img.close()
-            return cls(data)
+            return data
+
+    @classmethod
+    def from_file(cls, path):
+        img = cls._load_img_file(path)
+        if img:
+            return cls(img)
 
 class Material(ABC):
     def __init__(self,

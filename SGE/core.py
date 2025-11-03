@@ -88,6 +88,15 @@ class Light(Object, ABC):
         pass
 
 class Camera(Object, ABC):
+    """
+    Camera that will render a scene if it is active
+    Must have the following properties:
+      - A near plane in scene units
+      - A far plane in scene units
+      - Vec2 viewport dimensions in either normalized or pixel units
+      - fov, specifically vertical fov
+      - ortho size in scene units
+    """
     def __init__(self,
                  local_transform: Optional[Transform] = None,
                  viewport_dims: Vec2 = (1, 1),
