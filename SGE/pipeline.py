@@ -132,17 +132,17 @@ class Mesh(ABC):
         }
         for mesh in scene.mesh_list:
             faces.append(np.array(mesh.faces, np.uint32))
-            mat = mesh.materials[0] if mesh.materials else []
-            layout = mat.vertex_format.split('_')
-            seg_n = sum(data[l]["len"] for l in layout)
-            vertices = np.array(mat.vertices, np.float32)
-            vertices = vertices.reshape((vertices.size // seg_n, seg_n))
-            offset = 0
-            for i, l in enumerate(layout):
-                len = data[l]["len"]
-                s = vertices[:,offset:offset + len]
-                data[l]["d"].append(s)
-                offset += len
+            for mat in mesh.materials:
+                layout = mat.vertex_format.split('_')
+                seg_n = sum(data[l]["len"] for l in layout)
+                vertices = np.array(mat.vertices, np.float32)
+                vertices = vertices.reshape((vertices.size // seg_n, seg_n))
+                offset = 0
+                for i, l in enumerate(layout):
+                    len = data[l]["len"]
+                    s = vertices[:,offset:offset + len]
+                    data[l]["d"].append(s)
+                    offset += len
         faces = np.vstack(faces)
         for l in data:
             d = data[l]["d"]
