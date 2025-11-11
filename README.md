@@ -5,7 +5,7 @@
 
 ## Testing
 ### Install dependencies
-```pip install pyopengl pyopengl-accelerate pyopengltk pywavefront pygame numpy```
+```pip install pyopengl pyopengl-accelerate pyopengltk pywavefront pygame openimageio numpy```
 
 ### Run example
 ```python example.py```

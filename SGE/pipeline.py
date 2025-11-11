@@ -1,16 +1,16 @@
 from abc import ABC, abstractmethod
 import numpy as np
+import numpy.typing as npt
 import pywavefront
 import OpenImageIO as oiio
-from typing import Callable, TypeAlias, Any, Union
+from typing import Callable, TypeAlias, Annotated, Literal, Any, Union
 from .datatypes import Vector3, Vector2, Color4, Color, RGBA, RGB, Transform
 from enum import Enum
 
 RenderFunction: TypeAlias = Callable[[Transform],None] # Must be a world transform
-CPUPointBuffer: TypeAlias = np.ndarray[tuple[float, float], np.float32]
-CPUVertexBuffer: TypeAlias = np.ndarray[tuple[float, float, float], np.float32]
-CPUIFaceBuffer: TypeAlias = np.ndarray[tuple[int, int, int], np.uint32]
-CPUPixelBuffer: TypeAlias = np.ndarray[Any, Union[np.uint8, np.uint16, np.float16, np.float32]]
+CPUPointBuffer: TypeAlias = Annotated[npt.NDArray[np.float32], Literal["N", 2]]
+CPUVertexBuffer: TypeAlias = Annotated[npt.NDArray[np.float32], Literal["N", 3]]
+CPUPixelBuffer: TypeAlias = Annotated[npt.NDArray[Union[np.uint8, np.uint16, np.float16, np.float32]], Literal["H", "W", "C"]]
 
 class WrapMethod(Enum):
     REPEAT = 1
@@ -24,38 +24,25 @@ class FilterMethod(Enum):
 
 class Mesh(ABC):
     def __init__(self, 
-                 vertices:CPUVertexBuffer,
-                 normals:CPUVertexBuffer,
-                 vertex_colors:CPUVertexBuffer,
-                 faces:CPUIFaceBuffer,
-                 uv: CPUPointBuffer):
-        """
-        v = number of vertices
-
-        s = number of surfaces/faces
-        Args:
-            vertices: v, 3 array of vertices
-            normals: v, 3 array of vertex normals or s*3, 3 array of vertex normals per face
-            vertex_colors: v, 3 array of vertex colors
-            faces: s, 3 array of vertex indexed triangular faces
-            uv: s, 3, 2 array of vertex UVs per face
-        """
+                 vertices:list[CPUVertexBuffer],
+                 normals:list[CPUVertexBuffer],
+                 vertex_colors:list[CPUVertexBuffer],
+                 uv: list[CPUPointBuffer]):
         self._v_buf = vertices
         self._n_buf = normals
         self._c_buf = vertex_colors
-        self._f_buf = faces # Should not be edited
         self._uv_buf = uv
         
     @property
     @abstractmethod
-    def vertices(self) -> tuple[Vector3]:
+    def vertices(self) -> tuple[tuple[Vector3]]:
         # Should return a pre-initialized tuple of Vector3s WITH views to internal CPU buffers.
         # A syncronization mechanism should also ideally be implemented to push partial updates to the GPU.
         pass
 
     @property
     @abstractmethod
-    def normals(self) -> tuple[Vector3]:
+    def normals(self) -> tuple[tuple[Vector3]]:
         # Should return a pre-initialized tuple of Vector3s WITH views to internal CPU buffers.
         # A syncronization mechanism should also ideally be implemented to push partial updates to the GPU.
         # Unlike the layout of vertices and vertex colors, this will return an array with the same
@@ -64,14 +51,14 @@ class Mesh(ABC):
 
     @property
     @abstractmethod
-    def colors(self) -> tuple[Color]:
+    def colors(self) -> tuple[tuple[Color]]:
         # Should return a pre-initialized tuple of Colors WITH views to internal CPU buffers.
         # A syncronization mechanism should also ideally be implemented to push partial updates to the GPU.
         pass
 
     @property
     @abstractmethod
-    def uv(self) -> tuple[Vector2]:
+    def uv(self) -> tuple[tuple[Vector2]]:
         # Should return a pre-initialized tuple of Vector2s WITH views to internal CPU buffers.
         # A syncronization mechanism should also ideally be implemented to push partial updates to the GPU.
         # Unlike the formatting expected by the initializer, this function should return 
@@ -83,7 +70,7 @@ class Mesh(ABC):
         pass
 
     @abstractmethod
-    def draw_solid(self):
+    def draw_solid(self, material_idx:int):
         pass
 
     @abstractmethod
@@ -92,27 +79,15 @@ class Mesh(ABC):
         # Meant for cases where there is a significant amount of edits between frames.
         pass
 
-    def recalculate_normals(self):
-        fv = self._v_buf[self._f_buf]
-        p1 = fv[:,0]
-        p2 = fv[:,1]
-        p3 = fv[:,2]
-        u = p2 - p1
-        v = p3 - p1
-        normals = np.zeros_like(self._v_buf, dtype=np.float32)
-        face_normals = np.cross(u, v)
-        face_normals /= np.linalg.norm(face_normals, axis=1, keepdims=True) + 1e-8
-        for i in range(3):
-            np.add.at(normals, self._f_buf[:, i], face_normals)
-        normals /= np.linalg.norm(normals, axis=1, keepdims=True) + 1e-8
-        self._n_buf = normals
-        self._gpu_sync()
+    @property
+    def num_materials(self):
+        return len(self._v_buf)
 
     @staticmethod
-    def _load_mesh_from_obj(path):
+    def _load_mesh_from_obj(path:str):
         scene = pywavefront.Wavefront(path, collect_faces=True)
         faces = []
-        data = { # keeping here in case other interleaved data becomes useful later
+        data = {
             "V3F": {
                 "len": 3,
                 "d": []
@@ -131,46 +106,25 @@ class Mesh(ABC):
             },
         }
         for mesh in scene.mesh_list:
-            faces.append(np.array(mesh.faces, np.uint32))
-            for mat in mesh.materials:
+            for m, mat in enumerate(mesh.materials):
                 layout = mat.vertex_format.split('_')
                 seg_n = sum(data[l]["len"] for l in layout)
                 vertices = np.array(mat.vertices, np.float32)
                 vertices = vertices.reshape((vertices.size // seg_n, seg_n))
                 offset = 0
-                for i, l in enumerate(layout):
-                    len = data[l]["len"]
-                    s = vertices[:,offset:offset + len]
+                for l in layout:
+                    length = data[l]["len"]
+                    s = vertices[:,offset:offset + length]
+                    if l == "T2F":
+                        s[:,1] = 1 - s[:,1]
                     data[l]["d"].append(s)
-                    offset += len
-        faces = np.vstack(faces)
-        for l in data:
-            d = data[l]["d"]
-            if not d:
-                continue
-            data[l]["d"] = np.vstack(d)
-        uvs = data["T2F"]["d"]
-        uvs[:, 1] = 1 - uvs[:, 1]
-        uvs = uvs.reshape(faces.shape[0], 3, 2)
-        vertices = np.array(scene.vertices, np.float32)
-        colors = np.ones_like(vertices)
-        v_norm = data["N3F"]["d"]
-        if not isinstance(v_norm, list):
-            normals = v_norm
-        else:
-            fv = vertices[faces]
-            p1 = fv[:,0]
-            p2 = fv[:,1]
-            p3 = fv[:,2]
-            u = p2 - p1
-            v = p3 - p1
-            normals = np.zeros_like(vertices, dtype=np.float32)
-            face_normals = np.cross(u, v)
-            face_normals /= np.linalg.norm(face_normals, axis=1, keepdims=True) + 1e-8
-            for i in range(3):
-                np.add.at(normals, faces[:, i], face_normals)
-            normals /= np.linalg.norm(normals, axis=1, keepdims=True) + 1e-8
-        return vertices, normals, colors, faces, uvs
+                    offset += length
+                if len(data["C3F"]["d"]) != len(data["V3F"]["d"]):
+                    data["C3F"]["d"].append(np.ones_like(data["V3F"]["d"][m]))
+                if len(data["T2F"]["d"]) != len(data["V3F"]["d"]):
+                    data["T2F"]["d"].append(None)
+        print(len(data["V3F"]["d"]), len(data["C3F"]["d"]))
+        return data["V3F"]["d"], data["N3F"]["d"], data["C3F"]["d"], data["T2F"]["d"]
 
     @classmethod
     def from_obj_file(cls, path:str) -> "Mesh":

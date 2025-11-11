@@ -1,4 +1,5 @@
 from SGE.core import *
+from SGE.gl_common_types import glTexture
 from SGE.gl_ffp_pipeline import glFFPRenderingPipeline
 import pygame
 from pygame.locals import *
@@ -16,9 +17,9 @@ def main():
     light2 = pipeline.Light(index=1)
     light.set_parent(scene)
     light2.set_parent(scene)
-    light.local_transform.loc.update(-12, 0, -10)
+    light.local_transform.loc.xyz = (-12, 0, -10)
     light.color.rgb = (0, 0, 1)
-    light2.local_transform.loc.update(12, 0, 10)
+    light2.local_transform.loc.xyz = (12, 0, 10)
     light3 = pipeline.Light(index=2)
     light3.set_parent(scene)
     light3.directional = True
@@ -32,12 +33,12 @@ def main():
     mesh = pipeline.Mesh.from_obj_file("teapot.obj")
     material = pipeline.Material()
     material.specular = (0,0,0)
-    mesh_obj = Object(render_func=pipeline.MeshRenderer(mesh, material=material, flat_shading=False))
+    mesh_obj = Object(render_func=pipeline.MeshRenderer(mesh, materials=material, flat_shading=False))
     mesh_obj.set_parent(scene)
     mesh_obj.local_transform.scale *= 0.18
     previous_time = time.perf_counter()
     smoothed_dt = 1/30
-    s_alpha = 0.05
+    s_alpha = 0.5
 
     camera = pipeline.Camera(viewport_dims=display)
     camera.set_parent(scene)
@@ -60,8 +61,8 @@ def main():
 
         smoothed_dt = smoothed_dt * (1 - s_alpha) + dt * s_alpha
 
-        mesh_obj.rotate_local((0,0,1), 600*smoothed_dt)
-        mesh_obj.rotate_local((0,1,0), 100*smoothed_dt)
+        mesh_obj.rotate_local((0,0,1), 60*smoothed_dt)
+        mesh_obj.rotate_local((0,1,0), 10*smoothed_dt)
 
         pipeline.pre()
         scene.render()
@@ -69,5 +70,5 @@ def main():
 
         pygame.display.flip()
 
-        #print(1/smoothed_dt) # uncomment for fps
+        # print(1/smoothed_dt) # uncomment for fps
 main()

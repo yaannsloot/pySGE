@@ -1,5 +1,5 @@
 import math
-from typing import Optional, TypeAlias, Union, Optional
+from typing import Optional, TypeAlias, Union, Optional, Iterable
 from OpenGL.GL import *
 from OpenGL.GLU import *
 from OpenGL.arrays import vbo
@@ -10,64 +10,66 @@ from .pipeline import RenderingPipeline, RenderFunction, Mesh, Material
 from .gl_common_types import glTexture
 
 class glFFPMesh(Mesh):
-    def __init__(self, vertices, normals, vertex_colors, faces, uv, dynamic=True):
-        super().__init__(vertices, normals, vertex_colors, faces, uv)
-        f_indices = self._f_buf.flatten()
-        v_bins = [[] for _ in range(self._v_buf.shape[0])]
-        v_n = self._v_buf.shape[0]
-        for i, v in enumerate(f_indices):
-            v_bins[v].append(i)
-        self._v_buf = self._v_buf[self._f_buf].reshape(-1, 3)
-        if self._n_buf.shape != self._v_buf.shape:
-            self._n_buf = self._n_buf[self._f_buf].reshape(-1, 3)
-        self._c_buf = self._c_buf[self._f_buf].reshape(-1, 3)
-        self._uv_buf = self._uv_buf.reshape(-1, 2)
-        self._v_writes = set()
-        self._n_writes = set()
-        self._c_writes = set()
-        self._uv_writes = set()
-        self._v_refs = tuple([
-            Vector3(buffer=SignalingProxyBuffer(
-                buffer = [self._v_buf[j] for j in v_bins[i]],
-                buffer_index = v_bins[i],
-                modified_list = self._v_writes)) for i in range(v_n)]) if dynamic else ()
-        self._n_refs = tuple([
-            Vector3(buffer=SignalingProxyBuffer(
-                buffer = self._n_buf[i],
-                buffer_index = i,
-                modified_list = self._n_writes)) for i in range(self._n_buf.shape[0])]) if dynamic else ()
-        self._c_refs = tuple([
-            Vector3(buffer=SignalingProxyBuffer(
-                buffer = [self._c_buf[j] for j in v_bins[i]],
-                buffer_index = v_bins[i],
-                modified_list = self._c_writes)) for i in range(v_n)]) if dynamic else ()
-        self._uv_refs = tuple([
-            Vector2(buffer=SignalingProxyBuffer(self._uv_buf[i], buffer_index=i, modified_list=self._uv_writes))
-            for i in range(self._uv_buf.shape[0])]) if dynamic else ()
-        self._vert_vbo = vbo.VBO(self._v_buf)
-        self._normal_vbo = vbo.VBO(self._n_buf)
-        self._color_vbo = vbo.VBO(self._c_buf)
-        self._uv_vbo = vbo.VBO(self._uv_buf)
+    def __init__(self, vertices, normals, vertex_colors, uv, dynamic=True):
+        super().__init__(vertices, normals, vertex_colors, uv)
+        n_m = self.num_materials
+        self._v_writes = [set() for _ in range(n_m)]
+        self._n_writes = [set() for _ in range(n_m)]
+        self._c_writes = [set() for _ in range(n_m)]
+        self._uv_writes = [set() for _ in range(n_m)]
+        self._v_refs = tuple([tuple([
+                Vector3(buffer=SignalingProxyBuffer(
+                    buffer=self._v_buf[m][i],
+                    buffer_index=i,
+                    modified_list=self._v_writes[m])
+                ) for i in range(self._v_buf[m].shape[0])
+            ]) for m in range(n_m)]) if dynamic else ()
+        self._n_refs = tuple([tuple([
+                Vector3(buffer=SignalingProxyBuffer(
+                    buffer=self._n_buf[m][i],
+                    buffer_index=i,
+                    modified_list=self._n_writes[m])
+                ) for i in range(self._n_buf[m].shape[0])
+            ]) for m in range(n_m)]) if dynamic else ()
+        self._c_refs = tuple([tuple([
+                Color(buffer=SignalingProxyBuffer(
+                    buffer=self._c_buf[m][i],
+                    buffer_index=i,
+                    modified_list=self._c_writes[m])
+                ) for i in range(self._c_buf[m].shape[0])
+            ]) for m in range(n_m)]) if dynamic else ()
+        self._uv_refs = tuple([tuple([
+                Vector2(buffer=SignalingProxyBuffer(
+                    buffer=self._uv_buf[m][i],
+                    buffer_index=i,
+                    modified_list=self._uv_writes[m])
+                ) for i in range(self._uv_buf[m].shape[0])
+            ]) if self._uv_buf[m] is not None else None for m in range(n_m)]) if dynamic else ()
+        self._vert_vbo = []
+        self._normal_vbo = []
+        self._color_vbo = []
+        self._uv_vbo = []
+        for m in range(n_m):
+            self._vert_vbo.append(vbo.VBO(self._v_buf[m]))
+            self._normal_vbo.append(vbo.VBO(self._n_buf[m]))
+            self._color_vbo.append(vbo.VBO(self._c_buf[m]))
+            self._uv_vbo.append(vbo.VBO(self._uv_buf[m]) if self._uv_buf[m] is not None else None)
 
     @property
-    def vertices(self) -> tuple[Vector3]:
+    def vertices(self) -> tuple[tuple[Vector3]]:
         return self._v_refs
     
     @property
-    def normals(self) -> tuple[Vector3]:
+    def normals(self) -> tuple[tuple[Vector3]]:
         return self._n_refs
     
     @property
-    def colors(self) -> tuple[Vector3]:
+    def colors(self) -> tuple[tuple[Color]]:
         return self._c_refs
     
     @property
-    def uv(self) -> tuple[Vector2]:
+    def uv(self) -> tuple[tuple[Vector2]]:
         return self._uv_refs
-
-    def recalculate_normals(self):
-        super().recalculate_normals()
-        self._n_writes.add(0) # mark buffer as dirty
 
     def _push_writes(self, write_list, buffer, vec_n=3):
         # For float32 buffers only
@@ -82,72 +84,90 @@ class glFFPMesh(Mesh):
             glBufferSubData(GL_ARRAY_BUFFER, first * vec_n * 4, g_data.nbytes, g_data)
 
     def _gpu_sync(self):
-        if self._v_writes:
-            self._vert_vbo.bind()
-            glBufferSubData(GL_ARRAY_BUFFER, 0, self._v_buf.nbytes, self._v_buf)
-            self._vert_vbo.unbind()
-            self._v_writes.clear()
-        if self._n_writes:
-            self._normal_vbo.bind()
-            glBufferSubData(GL_ARRAY_BUFFER, 0, self._n_buf.nbytes, self._n_buf)
-            self._normal_vbo.unbind()
-            self._n_writes.clear()
-        if self._c_writes:
-            self._color_vbo.bind()
-            glBufferSubData(GL_ARRAY_BUFFER, 0, self._c_buf.nbytes, self._c_buf)
-            self._color_vbo.unbind()
-            self._c_writes.clear()
-        if self._uv_writes:
-            self._uv_vbo.bind()
-            glBufferSubData(GL_ARRAY_BUFFER, 0, self._uv_buf.nbytes, self._uv_buf)
-            self._uv_vbo.unbind()
-            self._uv_writes.clear()
+        for m in range(self.num_materials):
+            if self._v_writes[m]:
+                self._vert_vbo[m].bind()
+                glBufferSubData(GL_ARRAY_BUFFER, 0, self._v_buf[m].nbytes, self._v_buf[m])
+                self._vert_vbo[m].unbind()
+                self._v_writes[m].clear()
+            if self._n_writes[m]:
+                self._normal_vbo[m].bind()
+                glBufferSubData(GL_ARRAY_BUFFER, 0, self._n_buf[m].nbytes, self._n_buf[m])
+                self._normal_vbo[m].unbind()
+                self._n_writes[m].clear()
+            if self._c_writes[m]:
+                self._color_vbo[m].bind()
+                glBufferSubData(GL_ARRAY_BUFFER, 0, self._c_buf[m].nbytes, self._c_buf[m])
+                self._color_vbo[m].unbind()
+                self._c_writes[m].clear()
+            if self._uv_writes[m] and self._uv_vbo[m] is not None:
+                self._uv_vbo[m].bind()
+                glBufferSubData(GL_ARRAY_BUFFER, 0, self._uv_buf[m].nbytes, self._uv_buf[m])
+                self._uv_vbo[m].unbind()
+                self._uv_writes[m].clear()
 
-    def _bind_and_update_v(self):
-        self._vert_vbo.bind()
-        self._push_writes(self._v_writes, self._v_buf)
+    def _bind_and_update_v(self, material_idx):
+        self._vert_vbo[material_idx].bind()
+        self._push_writes(self._v_writes[material_idx], self._v_buf[material_idx])
 
-    def _bind_and_update_n(self):
-        self._normal_vbo.bind()
-        self._push_writes(self._n_writes, self._n_buf)
+    def _bind_and_update_n(self, material_idx):
+        self._normal_vbo[material_idx].bind()
+        self._push_writes(self._n_writes[material_idx], self._n_buf[material_idx])
 
-    def _bind_and_update_c(self):
-        self._color_vbo.bind()
-        self._push_writes(self._c_writes, self._c_buf)
+    def _bind_and_update_c(self, material_idx):
+        self._color_vbo[material_idx].bind()
+        self._push_writes(self._c_writes[material_idx], self._c_buf[material_idx])
 
-    def _bind_and_update_uv(self):
-        self._uv_vbo.bind()
-        self._push_writes(self._uv_writes, self._uv_buf, vec_n=2)
+    def _bind_and_update_uv(self, material_idx):
+        if self._uv_vbo[material_idx] is None:
+            return
+        self._uv_vbo[material_idx].bind()
+        self._push_writes(self._uv_writes[material_idx], self._uv_buf[material_idx], vec_n=2)
+
+    def _unbind_v(self, material_idx):
+        self._vert_vbo[material_idx].unbind()
+
+    def _unbind_n(self, material_idx):
+        self._normal_vbo[material_idx].unbind()
+
+    def _unbind_c(self, material_idx):
+        self._color_vbo[material_idx].unbind()
+
+    def _unbind_uv(self, material_idx):
+        if self._uv_vbo[material_idx] is None:
+            return
+        self._uv_vbo[material_idx].unbind()
 
     def draw_wire(self):
-        glPolygonMode(GL_FRONT_AND_BACK, GL_LINE)
-        glEnableClientState(GL_VERTEX_ARRAY)
-        self._bind_and_update_v()
-        glVertexPointer(3, GL_FLOAT, 0, None)
-        glDrawElements(GL_TRIANGLES, self._face_count, GL_UNSIGNED_INT, None)
-        self._vert_vbo.unbind()
-        glDisableClientState(GL_VERTEX_ARRAY)
+        for m in range(self.num_materials):
+            glPolygonMode(GL_FRONT_AND_BACK, GL_LINE)
+            glEnableClientState(GL_VERTEX_ARRAY)
+            self._bind_and_update_v(m)
+            glVertexPointer(3, GL_FLOAT, 0, None)
+            glDrawElements(GL_TRIANGLES, self._v_buf[m].shape[0], GL_UNSIGNED_INT, None)
+            self._unbind_v(m)
+            glDisableClientState(GL_VERTEX_ARRAY)
 
-    def draw_solid(self):
+    def draw_solid(self, material_idx):
         glPolygonMode(GL_FRONT_AND_BACK, GL_FILL)
         glEnableClientState(GL_VERTEX_ARRAY)
         glEnableClientState(GL_NORMAL_ARRAY)
         glEnableClientState(GL_COLOR_ARRAY)
         glEnableClientState(GL_TEXTURE_COORD_ARRAY)
         glEnable(GL_NORMALIZE)
-        self._bind_and_update_v()
+        self._bind_and_update_v(material_idx)
         glVertexPointer(3, GL_FLOAT, 0, None)
-        self._bind_and_update_n()
+        self._bind_and_update_n(material_idx)
         glNormalPointer(GL_FLOAT, 0, None)
-        self._bind_and_update_c()
+        self._bind_and_update_c(material_idx)
         glColorPointer(3, GL_FLOAT, 0, None)
-        self._bind_and_update_uv()
+        self._bind_and_update_uv(material_idx)
         glTexCoordPointer(2, GL_FLOAT, 0, None)
-        glDrawArrays(GL_TRIANGLES, 0, self._v_buf.shape[0])
-        self._uv_vbo.unbind()
-        self._color_vbo.unbind()
-        self._normal_vbo.unbind()
-        self._vert_vbo.unbind()
+        glDrawArrays(GL_TRIANGLES, 0, self._v_buf[material_idx].shape[0])
+        self._unbind_uv(material_idx)
+        self._unbind_c(material_idx)
+        self._unbind_n(material_idx)
+        self._unbind_v(material_idx)
         glDisableClientState(GL_TEXTURE_COORD_ARRAY)
         glDisableClientState(GL_COLOR_ARRAY)
         glDisableClientState(GL_NORMAL_ARRAY)
@@ -249,7 +269,7 @@ class glFFPMaterial(Material):
                          emission=emission)
         self.shininess = shininess
 
-    def draw(self, mesh: glFFPMesh):
+    def draw(self, mesh: glFFPMesh, mesh_mat_idx: int):
         lit = glIsEnabled(GL_LIGHTING)
         glActiveTexture(GL_TEXTURE0)
         if isinstance(self.base_color, glTexture):
@@ -265,7 +285,7 @@ class glFFPMaterial(Material):
             glMaterialfv(GL_FRONT_AND_BACK, GL_SPECULAR, (1.0, 1.0, 1.0, 1.0))
         if isinstance(self.emission, Color):
             glMaterialfv(GL_FRONT_AND_BACK, GL_EMISSION, (*self.emission, 1.0))
-        mesh.draw_solid()
+        mesh.draw_solid(mesh_mat_idx)
         if isinstance(self.specular, glTexture):
             glDepthMask(GL_FALSE)
             glDepthFunc(GL_EQUAL)
@@ -275,7 +295,7 @@ class glFFPMaterial(Material):
             glEnable(GL_TEXTURE_2D)
             self.specular.bind()
             glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_REPLACE)
-            mesh.draw_solid()
+            mesh.draw_solid(mesh_mat_idx)
             glDepthMask(GL_TRUE)
             glDepthFunc(GL_LESS)
             glDisable(GL_BLEND) 
@@ -289,7 +309,7 @@ class glFFPMaterial(Material):
             glEnable(GL_TEXTURE_2D)
             self.emission.bind()
             glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_REPLACE)
-            mesh.draw_solid()
+            mesh.draw_solid(mesh_mat_idx)
             glDepthMask(GL_TRUE)
             glDepthFunc(GL_LESS)
             glDisable(GL_BLEND)
@@ -382,19 +402,23 @@ class glFFPRenderingPipeline(RenderingPipeline):
     
     @staticmethod
     def MeshRenderer(mesh: Mesh, 
-                     material: Optional[glFFPMaterial] = None, 
+                     materials: Optional[list[glFFPMaterial]] = None, 
                      solid=True, 
                      flat_shading=False, 
                      wire=False, 
                      wire_color:tuple[float,float,float]=(1.0, 1.0, 1.0)) -> RenderFunction:
+        if not isinstance(materials, Iterable):
+            materials = [materials]
         def r_mesh(wt: Transform):
             glPushMatrix()
             glMultMatrixf(list(wt.mat.T.m))
             if solid:
                 glShadeModel(GL_FLAT if flat_shading else GL_SMOOTH)
-                if material:
-                    material.draw(mesh)
-                mesh.draw_solid()
+                for m in range(mesh.num_materials):
+                    if materials[m] is not None:
+                        materials[m].draw(mesh, m)
+                    else:
+                        mesh.draw_solid(m)
             if wire:
                 glDisable(GL_LIGHTING)
                 glColor3f(*wire_color)
