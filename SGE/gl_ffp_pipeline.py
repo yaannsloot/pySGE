@@ -271,11 +271,8 @@ class glFFPMaterial(Material):
 
     def draw(self, mesh: glFFPMesh, mesh_mat_idx: int):
         lit = glIsEnabled(GL_LIGHTING)
-        glActiveTexture(GL_TEXTURE0)
         if isinstance(self.base_color, glTexture):
-            glEnable(GL_TEXTURE_2D)
-            self.base_color.bind()
-            glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE)
+            glMaterialfv(GL_FRONT_AND_BACK, GL_AMBIENT_AND_DIFFUSE, (1.0, 1.0, 1.0, 1.0))
         else:
             glDisable(GL_TEXTURE_2D)
             glMaterialfv(GL_FRONT_AND_BACK, GL_AMBIENT_AND_DIFFUSE, self.base_color.rgba)
@@ -284,8 +281,17 @@ class glFFPMaterial(Material):
         else:
             glMaterialfv(GL_FRONT_AND_BACK, GL_SPECULAR, (1.0, 1.0, 1.0, 1.0))
         if isinstance(self.emission, Color):
-            glMaterialfv(GL_FRONT_AND_BACK, GL_EMISSION, (*self.emission, 1.0))
+            glMaterialfv(GL_FRONT_AND_BACK, GL_EMISSION, (*self.emission.rgb, 1.0))
+        glMaterialf(GL_FRONT_AND_BACK, GL_SHININESS, self.shininess)
+        glActiveTexture(GL_TEXTURE0)
+        if isinstance(self.base_color, glTexture):
+            glEnable(GL_TEXTURE_2D)
+            self.base_color.bind()
+            glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE)
+        else:
+            glDisable(GL_TEXTURE_2D)
         mesh.draw_solid(mesh_mat_idx)
+        glActiveTexture(GL_TEXTURE0)
         if isinstance(self.specular, glTexture):
             glDepthMask(GL_FALSE)
             glDepthFunc(GL_EQUAL)
@@ -313,7 +319,6 @@ class glFFPMaterial(Material):
             glDepthMask(GL_TRUE)
             glDepthFunc(GL_LESS)
             glDisable(GL_BLEND)
-        glMaterialf(GL_FRONT_AND_BACK, GL_SHININESS, self.shininess)
         glDisable(GL_TEXTURE_2D)
         glActiveTexture(GL_TEXTURE0)
         glTexture.unbind()
@@ -415,7 +420,7 @@ class glFFPRenderingPipeline(RenderingPipeline):
             if solid:
                 glShadeModel(GL_FLAT if flat_shading else GL_SMOOTH)
                 for m in range(mesh.num_materials):
-                    if materials[m] is not None:
+                    if m < len(materials) and materials[m] is not None:
                         materials[m].draw(mesh, m)
                     else:
                         mesh.draw_solid(m)
