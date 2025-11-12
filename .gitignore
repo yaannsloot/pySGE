@@ -158,3 +158,54 @@ cython_debug/
 #  and can be added to the global gitignore or merged into this file.  For a more nuclear
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
+
+# Project specific
+
+# Common 3D / geometry formats
+*.obj
+*.mtl
+*.fbx
+*.stl
+*.ply
+*.glb
+*.gltf
+*.3ds
+*.dae
+*.blend
+*.abc
+*.usd
+*.usda
+*.usdc
+*.usdz
+
+# Textures / maps
+*.png
+*.jpg
+*.jpeg
+*.tga
+*.tiff
+*.bmp
+*.exr
+*.hdr
+*.dds
+*.ktx
+*.ktx2
+
+# Cache / simulation / baked data
+*.bin
+*.pkl
+*.npz
+*.npy
+*.cache
+*.bak
+*.tmp
+
+# Allow assets for demo materials
+!assets/*
+
+# Ignore .py scripts in root dir for local tests
+/*.py
+
+# Allow specific scripts in root for demos
+!/teapot.py
+!/mushroom.py

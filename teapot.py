@@ -30,7 +30,7 @@ def main():
     light2.intensity = 2.5
     light2.color.rgb = (1, 0, 0)
     print("LOAD teapot.obj")
-    mesh = pipeline.Mesh.from_obj_file("teapot.obj")
+    mesh = pipeline.Mesh.from_obj_file("assets/teapot.obj")
     material = pipeline.Material()
     material.specular = (0,0,0)
     mesh_obj = Object(render_func=pipeline.MeshRenderer(mesh, materials=material, flat_shading=False))
