@@ -10,7 +10,7 @@ from .pipeline import RenderingPipeline, RenderFunction, Mesh, Material
 from .gl_common_types import glTexture
 
 class glFFPMesh(Mesh):
-    def __init__(self, vertices, normals, vertex_colors, uv, dynamic=True):
+    def __init__(self, vertices, normals, vertex_colors, uv, dynamic=False):
         super().__init__(vertices, normals, vertex_colors, uv)
         n_m = self.num_materials
         self._v_writes = [set() for _ in range(n_m)]
@@ -174,7 +174,7 @@ class glFFPMesh(Mesh):
         glDisableClientState(GL_VERTEX_ARRAY)
 
     @classmethod
-    def from_obj_file(cls, path, dynamic=True):
+    def from_obj_file(cls, path, dynamic=False):
         return cls(*cls._load_mesh_from_obj(path), dynamic)
 
 class glFFPLight(Light):

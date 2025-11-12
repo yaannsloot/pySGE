@@ -5,7 +5,7 @@ from .datatypes import Color4
 from .utils import SignalingProxyBuffer, group
 
 class glTexture(Texture):
-    def __init__(self, data, dynamic=True):
+    def __init__(self, data, dynamic=False):
         super().__init__(data)
         self._data_writes = set()
         w = self.width
@@ -50,7 +50,7 @@ class glTexture(Texture):
         glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST)
 
     @classmethod
-    def from_file(cls, path, dynamic=True):
+    def from_file(cls, path, dynamic=False):
         img = cls._load_img_file(path)
         if img is not None:
             return cls(img, dynamic)
