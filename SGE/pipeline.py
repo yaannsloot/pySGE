@@ -116,14 +116,15 @@ class Mesh(ABC):
                     length = data[l]["len"]
                     s = vertices[:,offset:offset + length]
                     if l == "T2F":
-                        s[:,1] = 1 - s[:,1]
+                        # in the rare case that objects have single tile uvs 
+                        # but the coordinates are in a different tile, this will fix that.
+                        s %= 1
                     data[l]["d"].append(s)
                     offset += length
                 if len(data["C3F"]["d"]) != len(data["V3F"]["d"]):
                     data["C3F"]["d"].append(np.ones_like(data["V3F"]["d"][m]))
                 if len(data["T2F"]["d"]) != len(data["V3F"]["d"]):
                     data["T2F"]["d"].append(None)
-        print(len(data["V3F"]["d"]), len(data["C3F"]["d"]))
         return data["V3F"]["d"], data["N3F"]["d"], data["C3F"]["d"], data["T2F"]["d"]
 
     @classmethod
@@ -186,6 +187,7 @@ class Texture(ABC):
         if img:
             data = img.read_image()
             img.close()
+            data = np.flipud(data)
             return data
 
     @classmethod
