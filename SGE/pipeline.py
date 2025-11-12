@@ -115,10 +115,6 @@ class Mesh(ABC):
                 for l in layout:
                     length = data[l]["len"]
                     s = vertices[:,offset:offset + length]
-                    if l == "T2F":
-                        # in the rare case that objects have single tile uvs 
-                        # but the coordinates are in a different tile, this will fix that.
-                        s %= 1
                     data[l]["d"].append(s)
                     offset += length
                 if len(data["C3F"]["d"]) != len(data["V3F"]["d"]):
@@ -134,7 +130,7 @@ class Mesh(ABC):
 class Texture(ABC):
     def __init__(self, 
                  data: CPUPixelBuffer, 
-                 wrap_method = WrapMethod.MIRRORED,
+                 wrap_method = WrapMethod.REPEAT,
                  filter_method = FilterMethod.LINEAR,
                  border_color: RGBA = (1.0, 1.0, 1.0, 0.0)):
         if data.dtype.kind in ('i', 'u'):
