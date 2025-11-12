@@ -7,7 +7,9 @@
 ### Install dependencies
 ```pip install pyopengl pyopengl-accelerate pyopengltk pywavefront pygame openimageio numpy```
 
-### Run example
-```python example.py```
+### Run examples
+```python teapot.py```
+
+```python mushroom.py```
 
 ![example](./assets/example.gif)
